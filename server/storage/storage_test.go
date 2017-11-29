@@ -434,6 +434,9 @@ func testGetChanges(t *testing.T, s MetaStore) {
 	if _, ok := s.(RethinkDB); ok {
 		require.Error(t, err1)
 		require.Error(t, err2)
+	} else if _, ok := s.(CouchDB); ok {
+		require.Error(t, err1)
+		require.Error(t, err2)
 	} else {
 		require.NoError(t, err1)
 		require.Error(t, err2)
