@@ -14,6 +14,7 @@ import (
 
 	"github.com/docker/distribution/health"
 	"github.com/docker/go-connections/tlsconfig"
+	"github.com/flimzy/kivik"
 	"github.com/sirupsen/logrus"
 	"github.com/spf13/viper"
 	"github.com/theupdateframework/notary"
@@ -24,6 +25,7 @@ import (
 	"github.com/theupdateframework/notary/signer/api"
 	"github.com/theupdateframework/notary/signer/keydbstore"
 	"github.com/theupdateframework/notary/storage"
+	"github.com/theupdateframework/notary/storage/couchdb"
 	"github.com/theupdateframework/notary/storage/rethinkdb"
 	"github.com/theupdateframework/notary/trustmanager"
 	"github.com/theupdateframework/notary/tuf/data"
@@ -138,6 +140,38 @@ func setUpCryptoservices(configuration *viper.Viper, allowedBackends []string, d
 			return nil, fmt.Errorf("Error starting %s driver: %s", backend, err.Error())
 		}
 		s := keydbstore.NewRethinkDBKeyStore(storeConfig.DBName, storeConfig.Username, storeConfig.Password, passphraseRetriever, defaultAlias, sess)
+		health.RegisterPeriodicFunc("DB operational", time.Minute, s.CheckHealth)
+
+		if doBootstrap {
+			keyService = s
+		} else {
+			keyService = keydbstore.NewCachedKeyService(s)
+		}
+	case notary.CouchDBBackend:
+		var client *kivik.Client
+		storeConfig, err := utils.ParseCouchDBStorage(configuration)
+		if err != nil {
+			return nil, err
+		}
+		defaultAlias, err := getDefaultAlias(configuration)
+		if err != nil {
+			return nil, err
+		}
+		tlsOpts := tlsconfig.Options{
+			CAFile:             storeConfig.CA,
+			CertFile:           storeConfig.Cert,
+			KeyFile:            storeConfig.Key,
+			ExclusiveRootPools: true,
+		}
+		if doBootstrap {
+			client, err = couchdb.AdminConnection(tlsOpts, storeConfig.Source)
+		} else {
+			client, err = couchdb.UserConnection(tlsOpts, storeConfig.Source, storeConfig.Username, storeConfig.Password)
+		}
+		if err != nil {
+			return nil, fmt.Errorf("Error starting %s driver: %s", backend, err.Error())
+		}
+		s := keydbstore.NewCouchDBKeyStore(storeConfig.DBName, storeConfig.Username, storeConfig.Password, passphraseRetriever, defaultAlias, client)
 		health.RegisterPeriodicFunc("DB operational", time.Minute, s.CheckHealth)
 
 		if doBootstrap {
