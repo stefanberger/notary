@@ -7,13 +7,16 @@ package keydbstore
 import (
 	"context"
 	"crypto/rand"
+	"fmt"
 	"os"
+	"reflect"
 	"strings"
 	"testing"
 	"time"
 
 	"github.com/docker/go-connections/tlsconfig"
 	"github.com/dvsekhvalnov/jose2go"
+	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"github.com/theupdateframework/notary/storage/couchdb"
 	"github.com/theupdateframework/notary/trustmanager"
@@ -21,6 +24,7 @@ import (
 	"github.com/theupdateframework/notary/tuf/signed"
 
 	"github.com/flimzy/kivik"
+	"github.com/flimzy/kivik/driver/couchdb/chttp"
 	_ "github.com/go-kivik/couchdb" //
 )
 
@@ -91,8 +95,20 @@ func TestCouchBootstrapSetsUsernamePassword(t *testing.T) {
 	s = NewCouchDBKeyStore(dbname, username, password, constRetriever, "ignored", userSession)
 	_, _, err = s.GetPrivateKey("nonexistent")
 	require.Error(t, err)
-	require.IsType(t, trustmanager.ErrKeyNotFound{}, err)
-	require.NoError(t, s.CheckHealth())
+
+	// CouchDB returns trustmanager.ErrKeyNotFound{}
+	expType1 := reflect.TypeOf(trustmanager.ErrKeyNotFound{})
+	// Cloudant doesn't allow other users to execute queries and returns
+	//	*chttp.HTTPError: Forbidden: one of _design, _reader is required for this request
+	expType2 := reflect.TypeOf(&chttp.HTTPError{})
+
+	errType := reflect.TypeOf(err)
+	if !assert.ObjectsAreEqual(expType1, errType) && !assert.ObjectsAreEqual(expType2, errType) {
+		assert.Fail(t, fmt.Sprintf("err must be either of type %v or %v but is of type %v", expType1, expType2, errType))
+	}
+	if assert.ObjectsAreEqual(expType1, err) {
+		require.NoError(t, s.CheckHealth())
+	}
 }
 
 func getAllKeys(client *kivik.Client, dbName, tableName string) ([]CDBPrivateKey, error) {
